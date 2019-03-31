@@ -34,7 +34,11 @@ public class MigrationConnection implements Connection {
 
     @Override
     public PreparedStatement prepareStatement(String sql) throws SQLException {
-        return new MigrationPreparedStatement(migrationContext, sql);
+        return new MigrationPreparedStatement(
+                (connection, args) -> connection.prepareStatement((String) args[0]),
+                migrationContext,
+                sql
+        );
     }
 
     @Override

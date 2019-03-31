@@ -24,15 +24,33 @@ import java.sql.Time;
 import java.sql.Timestamp;
 import java.util.Calendar;
 
-public class MigrationPreparedStatement implements PreparedStatement {
-    private MigrationContext migrationContext;
+public class MigrationPreparedStatement extends MigrationProxyBuilder<Connection, PreparedStatement> implements PreparedStatement {
     private String sql;
     private boolean isWriteStatement;
+    private boolean needMigration = true;
+    private PreparedStatement sourcePreparedStatement;
+    private PreparedStatement targetPreparedStatement;
 
-    public MigrationPreparedStatement(MigrationContext migrationContext, String sql) {
-        this.migrationContext = migrationContext;
+    public MigrationPreparedStatement(ProxyFunction<Connection, PreparedStatement> proxyFunction,
+                                      MigrationContext migrationContext,
+                                      String sql) throws SQLException {
+        super(proxyFunction);
+
         this.sql = sql;
+
         checkStatement();
+
+        String tableName = parseTableName(sql);
+        MigrationPair migrationPair = migrationContext.getMigrationPair(tableName);
+        Connection sourceConnection = migrationPair.getSource().dataSource.getConnection();
+        // TODO Add more args
+        sourcePreparedStatement = buildProxy(sourceConnection, sql);
+
+        if (needMigration) {
+            Connection targetConnection = migrationPair.getTarget().dataSource.getConnection();
+            String targetSql = sql.replace(migrationPair.getSource().tableName, migrationPair.getTarget().tableName);
+            targetPreparedStatement = buildProxy(targetConnection, targetSql);
+        }
     }
 
     @Override
@@ -42,12 +60,10 @@ public class MigrationPreparedStatement implements PreparedStatement {
 
     @Override
     public int executeUpdate() throws SQLException {
-        String tableName = parseTableName(sql);
-        MigrationPair migrationPair = migrationContext.getMigrationPair(tableName);
-        // TODO Fix that replace the string out of the table name.
-        String targetSql = sql.replace(migrationPair.getSource().tableName, migrationPair.getTarget().tableName);
-        executeUpdate(migrationPair.getTarget().dataSource, targetSql);
-        return executeUpdate(migrationPair.getSource().dataSource);
+        if (needMigration) {
+            targetPreparedStatement.executeUpdate();
+        }
+        return sourcePreparedStatement.executeUpdate();
     }
 
     @Override
@@ -433,7 +449,9 @@ public class MigrationPreparedStatement implements PreparedStatement {
     // TODO Fake impl
     private String parseTableName(String sql) {
         return "test";
-    }    @Override
+    }
+
+    @Override
     public void setFetchDirection(int direction) throws SQLException {
 
     }
@@ -554,6 +572,4 @@ public class MigrationPreparedStatement implements PreparedStatement {
     public boolean isCloseOnCompletion() throws SQLException {
         return false;
     }
-
-
 }
